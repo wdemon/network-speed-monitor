@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Детектор работоспособности сети</title>
+  <!-- Библиотеки -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <style>
+    :root { --cyber-blue:#00ffe0; --cyber-pink:#ff00ff; --cyber-bg:#0f0f23; --cyber-card:#1a1a2e; }
+    html,body{height:100%}
+    body{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;background:var(--cyber-bg);color:#e2e8f0;overflow-x:hidden;margin:0}
+    .bg-layer{position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:-1}
+    .grid-overlay{background-image:linear-gradient(rgba(0,255,224,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,224,.06) 1px,transparent 1px);background-size:40px 40px;opacity:.45}
+    @keyframes gridScroll{0%{background-position:0 0,0 0}100%{background-position:40px 40px,40px 40px}}
+    .grid-animated{background-image:linear-gradient(rgba(0,255,224,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,224,.03) 1px,transparent 1px);background-size:20px 20px;animation:gridScroll 20s linear infinite;opacity:.3;will-change:background-position}
+    .cyber-font{font-family:'Orbitron',system-ui,sans-serif;letter-spacing:.5px}
+    .cyber-card{background:linear-gradient(145deg,var(--cyber-card),var(--cyber-bg));border:1px solid var(--cyber-blue);box-shadow:0 0 20px rgba(0,255,224,.2);transition:transform .25s ease, box-shadow .25s ease;position:relative;overflow:hidden}
+    .cyber-card:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(0,255,224,.35)}
+    .cyber-text{color:var(--cyber-blue);text-shadow:0 0 5px var(--cyber-blue)}
+    .cyber-accent{color:var(--cyber-pink);text-shadow:0 0 5px var(--cyber-pink)}
+    .btn-detective{background:linear-gradient(145deg,#1a1a2e,#0f0f23);border:1px solid var(--cyber-blue);color:var(--cyber-blue);box-shadow:0 0 15px rgba(0,255,224,.3);transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease, color .2s ease;position:relative;overflow:hidden}
+    .btn-detective:hover{transform:translateY(-2px);box-shadow:0 6px 22px rgba(0,255,224,.45);color:#fff;border-color:#fff}
+    .cyber-loader{display:inline-block;border:2px solid rgba(0,255,224,.3);border-radius:50%;border-top:2px solid var(--cyber-blue);width:1rem;height:1rem;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .history-wrap{max-height:420px;overflow-y:auto}
+  </style>
+</head>
+<body>
+  <!-- Фон -->
+  <div class="bg-layer grid-overlay"></div>
+  <div class="bg-layer grid-animated"></div>
+
+  <div class="container mx-auto px-4 py-8 max-w-6xl">
+    <!-- Заголовок -->
+    <div class="flex justify-between items-center mb-10">
+      <div class="flex items-center gap-4">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="shrink-0">
+          <path d="M2 8h20M4 8v8m16-8v8M8 16h8" stroke="var(--cyber-blue)" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <h1 class="cyber-font text-3xl md:text-4xl font-bold cyber-text">
+          Детектор сети
+          <small class="block cyber-accent text-sm md:text-base">Мониторинг работоспособности</small>
+        </h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="theme-toggle" class="btn-detective rounded-full p-3 text-xl" title="Тема">🌓</button>
+        <button id="settings-btn" class="btn-detective rounded-full p-3 text-xl" title="Настройки">⚙️</button>
+      </div>
+    </div>
+
+    <!-- Контролы -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+      <div class="cyber-card rounded-lg p-4 flex-1">
+        <label class="cyber-text block mb-2 cyber-font">Показать за:</label>
+        <select id="days-select" class="w-full p-3 rounded-lg bg-[var(--cyber-card)] text-[var(--cyber-blue)] border border-[var(--cyber-blue)]">
+          <option value="1">1 день</option>
+          <option value="7" selected>7 дней</option>
+          <option value="14">14 дней</option>
+          <option value="30">30 дней</option>
+        </select>
+      </div>
+
+      <button id="run-test" class="btn-detective rounded-lg p-4 cyber-font text-lg flex items-center justify-center gap-3 w-full md:w-auto">
+        🔄 Запустить сканирование
+        <div id="test-loader" class="cyber-loader h-5 w-5" style="display:none;"></div>
+      </button>
+
+      <button id="export-pdf" class="btn-detective rounded-lg p-4 cyber-font text-lg flex items-center justify-center gap-3 w-full md:w-auto">
+        📄 Экспорт отчёта
+      </button>
+    </div>
+
+    <!-- Модалка настроек -->
+    <div id="settings-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+      <div class="bg-[var(--cyber-card)] border border-[var(--cyber-blue)] rounded-2xl w-full max-w-lg p-6 shadow-xl">
+        <h2 class="cyber-font text-2xl cyber-text mb-4">⚙️ Настройки</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="col-span-1">
+            <label class="block text-sm text-gray-300 mb-1">Период пинга</label>
+            <select id="interval-select" class="w-full p-2 rounded bg-[#0f0f23] border border-[var(--cyber-blue)] text-[var(--cyber-blue)]">
+              <option value="1">1 раз в час</option>
+              <option value="2">1 раз в 2 часа</option>
+              <option value="3">1 раз в 3 часа</option>
+              <option value="5">1 раз в 5 часов</option>
+            </select>
+          </div>
+          <div class="col-span-1">
+            <label class="block text-sm text-gray-300 mb-1">Язык отчёта</label>
+            <select id="report-lang" class="w-full p-2 rounded bg-[#0f0f23] border border-[var(--cyber-blue)] text-[var(--cyber-blue)]">
+              <option value="ru">Русский</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div class="col-span-1">
+            <label class="block text-sm text-gray-300 mb-1">Автообновление графиков</label>
+            <label class="inline-flex items-center gap-2"><input id="auto-refresh" type="checkbox" class="accent-cyan-400"><span class="text-gray-300 text-sm">каждые 5 минут</span></label>
+          </div>
+          <div class="col-span-1">
+            <label class="block text-sm text-gray-300 mb-1">Порог DL (Мбит/с)</label>
+            <input id="sla-dl" type="number" min="1" value="30" class="w-full p-2 rounded bg-[#0f0f23] border border-[var(--cyber-blue)] text-[var(--cyber-blue)]" />
+          </div>
+          <div class="col-span-1">
+            <label class="block text-sm text-gray-300 mb-1">Порог Ping (мс)</label>
+            <input id="sla-ping" type="number" min="1" value="100" class="w-full p-2 rounded bg-[#0f0f23] border border-[var(--cyber-blue)] text-[var(--cyber-blue)]" />
+          </div>
+          <div class="col-span-1">
+            <label class="block text-sm text-gray-300 mb-1">Строк в разделе "Последние тесты"</label>
+            <input id="recent-limit" type="number" min="5" max="50" value="12" class="w-full p-2 rounded bg-[#0f0f23] border border-[var(--cyber-blue)] text-[var(--cyber-blue)]" />
+          </div>
+        </div>
+        <div class="flex justify-end gap-3 mt-6">
+          <button id="settings-cancel" class="btn-detective rounded-lg px-4 py-2">Отмена</button>
+          <button id="settings-ok" class="btn-detective rounded-lg px-4 py-2">Ок</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Статистика -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div class="cyber-card rounded-xl p-6">
+        <h3 class="cyber-font text-xl cyber-text mb-4 flex items-center gap-2">⚡ Текущая скорость <span class="ml-auto text-xs bg-red-500 text-white px-2 py-1 rounded-full">LIVE</span></h3>
+        <div class="space-y-3">
+          <p class="flex justify-between"><span class="text-gray-400">Загрузка:</span><span id="current-download" class="cyber-text font-bold">-</span></p>
+          <p class="flex justify-between"><span class="text-gray-400">Отдача:</span><span id="current-upload" class="cyber-text font-bold">-</span></p>
+          <p class="flex justify-between"><span class="text-gray-400">Пинг:</span><span id="current-ping" class="cyber-text font-bold">-</span></p>
+        </div>
+      </div>
+
+      <div class="cyber-card rounded-xl p-6">
+        <h3 class="cyber-font text-xl cyber-text mb-4 flex items-center gap-2">📊 Средние значения</h3>
+        <div class="space-y-3">
+          <p class="flex justify-between"><span class="text-gray-400">Загрузка:</span><span id="avg-download" class="cyber-text font-bold">-</span></p>
+          <p class="flex justify-between"><span class="text-gray-400">Отдача:</span><span id="avg-upload" class="cyber-text font-bold">-</span></p>
+          <p class="flex justify-between"><span class="text-gray-400">Стабильность:</span><span id="stability" class="font-bold">-</span></p>
+        </div>
+      </div>
+
+      <div class="cyber-card rounded-xl p-6">
+        <h3 class="cyber-font text-xl cyber-text mb-4 flex items-center gap-2">🛰️ Диагностика</h3>
+        <div class="space-y-3">
+          <p class="flex justify-between"><span class="text-gray-400">Состояние:</span><span id="connection-status" class="font-bold">-</span></p>
+          <p class="flex justify-between"><span class="text-gray-400">Последний тест:</span><span id="last-test">-</span></p>
+          <p class="flex justify-between"><span class="text-gray-400">Сервер:</span><span id="server">-</span></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Графики -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+      <div class="cyber-card rounded-xl p-6">
+        <h3 class="cyber-font text-xl cyber-text mb-4 flex items-center gap-2">📈 История скорости</h3>
+        <div class="h-[280px]"><canvas id="speedChart"></canvas></div>
+      </div>
+      <div class="cyber-card rounded-xl p-6">
+        <h3 class="cyber-font text-xl cyber-text mb-4 flex items-center gap-2">⏱️ Средняя скорость по часам</h3>
+        <div class="h-[280px]"><canvas id="hourlyChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- История + Анализ -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="cyber-card rounded-xl p-6">
+        <h3 class="cyber-font text-xl cyber-text mb-4 flex items-center gap-2">🕒 Последние тесты (24 часа)</h3>
+        <div class="history-wrap">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-gray-800">
+                <th class="py-3 px-4 text-left text-gray-400 cyber-font">Время</th>
+                <th class="py-3 px-4 text-left text-gray-400 cyber-font">Загрузка</th>
+                <th class="py-3 px-4 text-left text-gray-400 cyber-font">Отдача</th>
+                <th class="py-3 px-4 text-left text-gray-400 cyber-font">Пинг</th>
+              </tr>
+            </thead>
+            <tbody id="history-table" class="divide-y divide-gray-800"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="cyber-card rounded-xl p-6">
+        <h3 class="cyber-font text-xl cyber-text mb-4 flex items-center gap-2">🧪 Анализ проблем</h3>
+        <div id="issues-list" class="space-y-3">
+          <div class="flex items-start p-3 bg-gray-900 rounded-lg"><span class="mr-3 mt-1">🔍</span><div><h4 class="font-bold">Анализ выполняется...</h4><p class="text-sm text-gray-400">Детектор сканирует данные для выявления проблем</p></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // === Глобальные переменные ===
+    let speedChart, hourlyChart;
+    let allData = [];
+    const { jsPDF } = window.jspdf;
+    const MAX_DATA_POINTS = 100;
+
+    // ===== Настройки (локальные) =====
+    const DEFAULT_SETTINGS = { intervalHours: 1, reportLang: 'ru', autoRefresh: true, slaDl: 30, slaPing: 100, recentLimit: 12 };
+    function getSettings(){ try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('settings')||'{}') }; } catch { return { ...DEFAULT_SETTINGS }; } }
+    function saveSettings(s){ localStorage.setItem('settings', JSON.stringify(s)); }
+
+    function initTheme() {
+      const themeToggle = document.getElementById('theme-toggle');
+      const saved = localStorage.getItem('theme') || 'dark';
+      document.documentElement.dataset.theme = saved;
+      themeToggle.textContent = saved === 'dark' ? '🌞' : '🌓';
+      themeToggle.addEventListener('click', () => {
+        const isDark = (localStorage.getItem('theme') || 'dark') === 'dark';
+        const next = isDark ? 'light' : 'dark';
+        localStorage.setItem('theme', next);
+        document.documentElement.dataset.theme = next;
+        themeToggle.textContent = next === 'dark' ? '🌞' : '🌓';
+      });
+    }
+
+    function notify(msg, type='info') {
+      const colors = { info: 'bg-blue-500', error: 'bg-red-500', success: 'bg-green-600' };
+      const el = document.createElement('div');
+      el.className = `fixed top-4 right-4 ${colors[type]} text-white px-4 py-2 rounded shadow z-50 transition-transform`;
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => { el.style.transform = 'translateX(150%)'; setTimeout(()=>el.remove(), 250); }, 2200);
+    }
+
+    async function loadData(days = 7) {
+      try {
+        const res = await fetch(`/api/data?days=${days}`);
+        if (!res.ok) throw new Error('Bad response');
+        return await res.json();
+      } catch (e) {
+        console.error(e);
+        notify('Не удалось загрузить данные', 'error');
+        return { data: [] };
+      }
+    }
+
+    async function loadInitialData() {
+      const days = document.getElementById('days-select').value;
+      const data = await loadData(days);
+      allData = data.data || [];
+      window.allData = allData; // для PDF
+      updateCurrentStats();
+      updateHistoryTable();
+      updateIssuesList();
+      renderCharts();
+      calculateHourlyAverages();
+      applyAutoRefresh();
+    }
+
+    async function updateChart() {
+      const days = document.getElementById('days-select').value;
+      const data = await loadData(days);
+      allData = data.data || [];
+      window.allData = allData;
+      updateCurrentStats();
+      updateHistoryTable();
+      updateIssuesList();
+      renderCharts();
+      calculateHourlyAverages();
+    }
+
+    function updateCurrentStats() {
+      if (!allData.length || !allData[0].data.length) {
+        for (const id of ['current-download','current-upload','current-ping','last-test','server']) {
+          document.getElementById(id).textContent = '-';
+        }
+        const cs = document.getElementById('connection-status');
+        cs.textContent = '-'; cs.className = 'font-bold';
+        document.getElementById('avg-download').textContent = '-';
+        document.getElementById('avg-upload').textContent = '-';
+        document.getElementById('stability').textContent = '-';
+        document.getElementById('stability').className = 'font-bold';
+        return;
+      }
+      const latest = allData[0].data[0];
+      document.getElementById('current-download').textContent = latest.download;
+      document.getElementById('current-upload').textContent = latest.upload;
+      document.getElementById('current-ping').textContent = latest.ping;
+      document.getElementById('last-test').textContent = new Date(latest.timestamp).toLocaleTimeString();
+      document.getElementById('server').textContent = (latest.server||'').split('.')[0] || '-';
+
+      const statusEl = document.getElementById('connection-status');
+      if (+latest.ping < 20) { statusEl.textContent = 'Отличное'; statusEl.className = 'text-green-400 font-bold'; }
+      else if (+latest.ping < 50) { statusEl.textContent = 'Хорошее'; statusEl.className = 'text-yellow-400 font-bold'; }
+      else { statusEl.textContent = 'Плохое'; statusEl.className = 'text-red-400 font-bold'; }
+
+      let dSum=0,uSum=0,pSum=0,c=0;
+      allData.forEach(day => day.data.forEach(t => { dSum+=+t.download; uSum+=+t.upload; pSum+=+t.ping; c++; }));
+      if (c) {
+        const avgD=(dSum/c).toFixed(2), avgU=(uSum/c).toFixed(2);
+        document.getElementById('avg-download').textContent = avgD;
+        document.getElementById('avg-upload').textContent = avgU;
+        const stabilityEl = document.getElementById('stability');
+        const stability = (+avgD && +latest.download) ? (avgD / +latest.download * 100).toFixed(0) : 0;
+        if (stability>90) { stabilityEl.textContent='Высокая'; stabilityEl.className='text-green-400 font-bold'; }
+        else if (stability>70) { stabilityEl.textContent='Средняя'; stabilityEl.className='text-yellow-400 font-bold'; }
+        else { stabilityEl.textContent='Низкая'; stabilityEl.className='text-red-400 font-bold'; }
+      }
+    }
+
+    function calculateHourlyAverages() {
+      if (!allData.length) return;
+      const hourly = Array.from({length:24},()=>({d:[],u:[],p:[]}));
+      allData.forEach(day => day.data.forEach(t=>{ const h=new Date(t.timestamp).getHours(); hourly[h].d.push(+t.download); hourly[h].u.push(+t.upload); hourly[h].p.push(+t.ping);}));
+      const av = hourly.map(h=>({
+        download: h.d.length ? (h.d.reduce((a,b)=>a+b,0)/h.d.length).toFixed(2) : 0,
+        upload:   h.u.length ? (h.u.reduce((a,b)=>a+b,0)/h.u.length).toFixed(2) : 0,
+        ping:     h.p.length ? (h.p.reduce((a,b)=>a+b,0)/h.p.length).toFixed(2) : 0,
+      }));
+      renderHourlyChart(av);
+    }
+
+    function updateHistoryTable() {
+      const tbody = document.getElementById('history-table');
+      tbody.innerHTML = '';
+      if (!allData.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="py-3 px-4 text-center text-gray-400">Нет данных для отображения</td></tr>';
+        return;
+      }
+      const tests = (allData[0].data || []).slice(0,24).reverse();
+      if (!tests.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="py-3 px-4 text-center text-gray-400">Нет данных для отображения</td></tr>';
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      for (const t of tests) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="py-3 px-4">${new Date(t.timestamp).toLocaleTimeString()}</td>
+                        <td class="py-3 px-4 text-[var(--cyber-blue)]">${t.download} Мбит/с</td>
+                        <td class="py-3 px-4 text-[var(--cyber-blue)]">${t.upload} Мбит/с</td>
+                        <td class="py-3 px-4">${t.ping} мс</td>`;
+        frag.appendChild(tr);
+      }
+      tbody.appendChild(frag);
+    }
+
+    function updateIssuesList() {
+      const box = document.getElementById('issues-list');
+      box.innerHTML = '';
+      if (!allData.length || !(allData[0].data||[]).length) {
+        box.innerHTML = '<div class="flex items-start p-3 bg-gray-900 rounded-lg"><span class="mr-3 mt-1">ℹ️</span><div><h4 class="font-bold">Данные отсутствуют</h4><p class="text-sm text-gray-400">Нет данных для анализа сетевых проблем</p></div></div>';
+        return;
+      }
+      const tests = allData[0].data;
+      const sSet = getSettings();
+      const slowD = tests.filter(t => +t.download < sSet.slaDl).length;
+      const slowU = tests.filter(t => +t.upload < Math.max(1, Math.round(sSet.slaDl*0.33))).length;
+      const highP = tests.filter(t => +t.ping > sSet.slaPing).length;
+      const add = (title, desc, emoji) => box.insertAdjacentHTML('beforeend', `<div class="flex items-start p-3 bg-gray-900 rounded-lg mb-2"><span class="mr-3 mt-1">${emoji}</span><div><h4 class="font-bold">${title}</h4><p class="text-sm text-gray-400">${desc}</p></div></div>`);
+      if (slowD>5) add('Низкая скорость загрузки', `Обнаружено ${slowD} случаев ниже ${sSet.slaDl} Мбит/с`, '📉');
+      if (slowU>5) add('Низкая скорость отдачи', `Обнаружено ${slowU} случаев ниже ${Math.max(1, Math.round(sSet.slaDl*0.33))} Мбит/с`, '⬇️');
+      if (highP>3) add('Высокий пинг', `Обнаружено ${highP} случаев выше ${sSet.slaPing} мс`, '⏲️');
+      const avgD = tests.reduce((s,t)=>s+ +t.download,0)/tests.length;
+      const minD = Math.min(...tests.map(t=>+t.download));
+      if ((avgD - minD) > 20) add('Нестабильная скорость', 'Колебания скорости загрузки более 20 Мбит/с', '🌊');
+      if (!box.children.length) add('Проблем не обнаружено', 'Сетевое соединение стабильное', '✅');
+    }
+
+    function renderCharts() { renderSpeedChart(); }
+
+    function renderSpeedChart() {
+      const ctx = document.getElementById('speedChart').getContext('2d');
+      const allTests = [];
+      allData.forEach(day => day.data.forEach(t => allTests.push(t)));
+      const limited = allTests.slice(-MAX_DATA_POINTS);
+      const labels = limited.map(t => new Date(t.timestamp).toLocaleTimeString());
+      const dData = limited.map(t => t.download);
+      const uData = limited.map(t => t.upload);
+      if (speedChart) speedChart.destroy();
+      speedChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets: [
+          { label: 'Скорость загрузки (Мбит/с)', data: dData, borderColor: '#00ffe0', backgroundColor: 'rgba(0,255,224,.12)', borderWidth: 2, tension: .3, fill: true, pointRadius: 2 },
+          { label: 'Скорость отдачи (Мбит/с)', data: uData, borderColor: '#ff00ff', backgroundColor: 'rgba(255,0,255,.12)', borderWidth: 2, tension: .3, fill: true, pointRadius: 2 },
+        ]},
+        options: chartOptions('История изменения скорости сети')
+      });
+    }
+
+    function renderHourlyChart(hourlyAv) {
+      const ctx = document.getElementById('hourlyChart').getContext('2d');
+      const labels = Array.from({length:24},(_,i)=>`${i}:00`);
+      if (hourlyChart) hourlyChart.destroy();
+      hourlyChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets: [
+          { label: 'Средняя загрузка (Мбит/с)', data: hourlyAv.map(h=>h.download), backgroundColor: 'rgba(0,255,224,.7)', borderColor: '#00ffe0', borderWidth: 1 },
+          { label: 'Средняя отдача (Мбит/с)', data: hourlyAv.map(h=>h.upload), backgroundColor: 'rgba(255,0,255,.7)', borderColor: '#ff00ff', borderWidth: 1 },
+        ]},
+        options: chartOptions('Средняя скорость по часам')
+      });
+    }
+
+    function chartOptions(title) {
+      return { responsive:true, maintainAspectRatio:false,
+        plugins:{ title:{ display:true, text:title, color:'#00ffe0', font:{ size:16 } }, legend:{ labels:{ color:'#e2e8f0' } }, tooltip:{ mode:'index', intersect:false } },
+        scales:{ x:{ ticks:{ color:'#a0aec0', maxRotation:45, minRotation:45, autoSkip:true, maxTicksLimit:15 }, grid:{ color:'rgba(160,174,192,.1)' } }, y:{ ticks:{ color:'#a0aec0' }, grid:{ color:'rgba(160,174,192,.1)' } } },
+        interaction:{ mode:'nearest', axis:'x', intersect:false } };
+    }
+
+    function applyAutoRefresh(){
+      clearInterval(window.__autoRefreshTimer);
+      const s = getSettings();
+      if (s.autoRefresh){ window.__autoRefreshTimer = setInterval(updateChart, 5*60*1000); }
+    }
+
+    // Запуск теста
+    document.getElementById('run-test').addEventListener('click', async () => {
+      const btn = document.getElementById('run-test');
+      const loader = document.getElementById('test-loader');
+      btn.disabled = true; loader.style.display = 'inline-block'; btn.firstChild.textContent = '⏳ Сканирование...';
+      try {
+        const res = await fetch('/api/test-now', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        if (!res.ok) throw new Error('Network response was not ok');
+        const result = await res.json();
+        if (!result.success) throw new Error('Test failed to start');
+        notify('Тест скорости запущен', 'success');
+        setTimeout(updateChart, 5000);
+      } catch (e) {
+        console.error(e);
+        notify('Не удалось запустить тест скорости', 'error');
+      } finally {
+        btn.disabled = false; loader.style.display = 'none'; btn.firstChild.textContent = '🔄 Запустить сканирование';
+      }
+    });
+
+    // Обработчики настроек
+    const modal = document.getElementById('settings-modal');
+    document.getElementById('settings-btn').addEventListener('click', ()=>{
+      const s=getSettings();
+      document.getElementById('interval-select').value = String(s.intervalHours);
+      document.getElementById('report-lang').value = s.reportLang;
+      document.getElementById('auto-refresh').checked = !!s.autoRefresh;
+      document.getElementById('sla-dl').value = s.slaDl;
+      document.getElementById('sla-ping').value = s.slaPing;
+      document.getElementById('recent-limit').value = s.recentLimit;
+      modal.classList.remove('hidden'); modal.classList.add('flex');
+    });
+    document.getElementById('settings-cancel').addEventListener('click', ()=>{ modal.classList.add('hidden'); modal.classList.remove('flex'); });
+    document.getElementById('settings-ok').addEventListener('click', async ()=>{
+      const s = getSettings();
+      s.intervalHours = +document.getElementById('interval-select').value;
+      s.reportLang = document.getElementById('report-lang').value;
+      s.autoRefresh = document.getElementById('auto-refresh').checked;
+      s.slaDl = +document.getElementById('sla-dl').value || DEFAULT_SETTINGS.slaDl;
+      s.slaPing = +document.getElementById('sla-ping').value || DEFAULT_SETTINGS.slaPing;
+      s.recentLimit = +document.getElementById('recent-limit').value || DEFAULT_SETTINGS.recentLimit;
+      saveSettings(s); applyAutoRefresh();
+      modal.classList.add('hidden'); modal.classList.remove('flex');
+      try {
+        await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ test_interval: s.intervalHours*3600 }) });
+      } catch(e) { /* no-op */ }
+      notify('Настройки сохранены', 'success');
+    });
+
+    document.getElementById('days-select').addEventListener('change', updateChart);
+
+    document.addEventListener('DOMContentLoaded', () => { initTheme(); loadInitialData(); });
+  </script>
+
+  <!-- === PDF Экспорт: глобальная функция и обработчик === -->
+  <script>
+    // Глобальная функция встраивания TTF
+    window.loadFontToJsPDF = async function loadFontToJsPDF(doc, url, name='NotoSans', style='normal') {
+      const res = await fetch(url);
+      const buf = await res.arrayBuffer();
+      let bin = ''; const bytes = new Uint8Array(buf);
+      for (let i=0;i<bytes.length;i++) bin += String.fromCharCode(bytes[i]);
+      const b64 = btoa(bin);
+      doc.addFileToVFS(`${name}.ttf`, b64);
+      doc.addFont(`${name}.ttf`, name, style);
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('export-pdf');
+      if (!btn) return;
+
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; btn.textContent = '⏳ Генерация отчёта...';
+        try {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ unit:'pt', format:'a4' });
+          const fontUrl = '/static/fonts/NotoSans-Regular.ttf';
+          await window.loadFontToJsPDF(doc, fontUrl, 'NotoSans', 'normal');
+          doc.setFont('NotoSans', 'normal');
+
+          const S = getSettings();
+          const I18N = {
+            ru: { title:'Отчёт о работоспособности сети', dt:'Дата и время', server:'Сервер', summary:'Текущие значения', dl:'Загрузка', ul:'Отдача', ping:'Пинг', compare:'Сравнение с предыдущим тестом', notEnough:'Недостаточно данных для сравнения', stats:'Статистика за период', avg:'Среднее', min:'Минимум', max:'Максимум', p95:'95-й перцентиль (пинг)', recent:'Последние измерения', issues:'Зафиксированные отклонения (по порогам):', generated:'Сформировано:', contact:'Контакт для связи:' },
+            en: { title:'Network Performance Report', dt:'Date & time', server:'Server', summary:'Current values', dl:'Download', ul:'Upload', ping:'Ping', compare:'Comparison with previous test', notEnough:'Not enough data for comparison', stats:'Period statistics', avg:'Average', min:'Minimum', max:'Maximum', p95:'95th percentile (ping)', recent:'Recent measurements', issues:'Detected deviations (thresholds):', generated:'Generated:', contact:'Contact:' }
+          };
+          const L = I18N[S.reportLang] || I18N.ru;
+
+          // Данные
+          const dataSrc = (window.allData) ? window.allData : (typeof allData !== 'undefined' ? allData : []);
+          const day0 = dataSrc?.[0] || { data: [] };
+          const tests = day0.data || [];
+          const latest = tests[0] || null;
+          const prev   = tests[1] || null;
+          const flat = [];
+          (dataSrc || []).forEach(d => (d.data || []).forEach(t => flat.push(t)));
+
+          function num(v, d=2){ const n=Number(v); return Number.isFinite(n) ? n.toFixed(d) : '—'; }
+          function pctDelta(cur, prev){ if(!Number.isFinite(prev) || prev===0) return '—'; return ((cur-prev)/prev*100).toFixed(1)+'%'; }
+
+          const cur = {
+            ts: latest ? new Date(latest.timestamp) : new Date(),
+            dl: latest ? +latest.download : +(document.getElementById('current-download').textContent || 0),
+            ul: latest ? +latest.upload   : +(document.getElementById('current-upload').textContent   || 0),
+            ping: latest ? +latest.ping   : +(document.getElementById('current-ping').textContent     || 0),
+            server: latest ? (latest.server || '-') : (document.getElementById('server').textContent || '-')
+          };
+          const prevVals = prev ? { dl:+prev.download, ul:+prev.upload, ping:+prev.ping } : null;
+
+          const dls = flat.map(t=>+t.download).filter(Number.isFinite);
+          const uls = flat.map(t=>+t.upload).filter(Number.isFinite);
+          const pings = flat.map(t=>+t.ping).filter(Number.isFinite);
+          const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : NaN;
+          const min = arr => arr.length ? Math.min(...arr) : NaN;
+          const max = arr => arr.length ? Math.max(...arr) : NaN;
+          const p95 = arr => { if(!arr.length) return NaN; const s=[...arr].sort((a,b)=>a-b); const idx=Math.floor(0.95*(s.length-1)); return s[idx]; };
+          const stats = { dl_avg:avg(dls), dl_min:min(dls), dl_max:max(dls), ul_avg:avg(uls), ul_min:min(uls), ul_max:max(uls), ping_avg:avg(pings), ping_p95:p95(pings) };
+
+          const dt = cur.ts.toLocaleString(S.reportLang==='en'?'en-US':'ru-RU', { weekday:'long', year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+
+          const margin = 40; let y = margin;
+          doc.setTextColor(0,255,224); doc.setFontSize(20);
+          doc.text(L.title, doc.internal.pageSize.getWidth()/2, y, { align:'center' }); y+=18;
+
+          doc.setTextColor(0,0,0); doc.setFontSize(11);
+          doc.text(`${L.dt}: ${dt}`, margin, y); y+=14;
+          doc.text(`${L.server}: ${cur.server}`, margin, y); y+=10;
+
+          // Сводная
+          doc.autoTable({ startY:y+6, styles:{ font:'NotoSans', fontSize:11, cellPadding:6 }, headStyles:{ fillColor:[15,15,35], textColor:[255,255,255] }, head:[[L.summary, '']], body:[[`${L.dl}, Мбит/с`, num(cur.dl)], [`${L.ul}, Мбит/с`, num(cur.ul)], [`${L.ping}, мс`, num(cur.ping)]], margin:{ left:margin,right:margin } });
+          y = doc.lastAutoTable.finalY + 10;
+
+          // Сравнение
+          doc.autoTable({ startY:y, styles:{ font:'NotoSans', fontSize:11, cellPadding:6 }, headStyles:{ fillColor:[15,15,35], textColor:[255,255,255] }, head:[[L.compare, L.dt, 'Prev', 'Δ Abs.', 'Δ %']], body: prevVals ? [ [L.dl, num(cur.dl), num(prevVals.dl), num(cur.dl-prevVals.dl), pctDelta(cur.dl, prevVals.dl)], [L.ul, num(cur.ul), num(prevVals.ul), num(cur.ul-prevVals.ul), pctDelta(cur.ul, prevVals.ul)], [L.ping, num(cur.ping), num(prevVals.ping), num(cur.ping-prevVals.ping), pctDelta(cur.ping, prevVals.ping)] ] : [[L.notEnough,'—','—','—','—']], margin:{ left:margin,right:margin } });
+          y = doc.lastAutoTable.finalY + 10;
+
+          // Статистика периода
+          doc.autoTable({ startY:y, styles:{ font:'NotoSans', fontSize:11, cellPadding:6 }, headStyles:{ fillColor:[15,15,35], textColor:[255,255,255] }, head:[[L.stats, L.avg, L.min, L.max, L.p95]], body:[[`${L.dl}, Мбит/с`, num(stats.dl_avg), num(stats.dl_min), num(stats.dl_max), '—'], [`${L.ul}, Мбит/с`, num(stats.ul_avg), num(stats.ul_min), num(stats.ul_max), '—'], [`${L.ping}, мс`, num(stats.ping_avg), '—', '—', num(stats.ping_p95)]], margin:{ left:margin,right:margin } });
+          y = doc.lastAutoTable.finalY + 10;
+
+          // Последние измерения
+          const recent = tests.slice(0, getSettings().recentLimit).map(t=>[ new Date(t.timestamp).toLocaleString(S.reportLang==='en'?'en-US':'ru-RU'), num(+t.download), num(+t.upload), num(+t.ping), (t.server||'-') ]);
+          doc.autoTable({ startY:y, styles:{ font:'NotoSans', fontSize:10, cellPadding:5 }, headStyles:{ fillColor:[15,15,35], textColor:[255,255,255] }, head:[[L.dt, `${L.dl}, Мбит/с`, `${L.ul}, Мбит/с`, `${L.ping}, мс`, L.server]], body: recent.length?recent:[['—','—','—','—','—']], margin:{ left:margin,right:margin } });
+          y = doc.lastAutoTable.finalY + 16;
+
+          // Отклонения
+          const sSet = getSettings();
+          const issues=[]; const slowDl=dls.filter(v=>v<sSet.slaDl).length; const slowUl=uls.filter(v=>v<Math.max(1,Math.round(sSet.slaDl*0.33))).length; const highPing=pings.filter(v=>v>sSet.slaPing).length;
+          if(slowDl) issues.push(`${L.dl}: < ${sSet.slaDl} Мбит/с — ${slowDl}`);
+          if(slowUl) issues.push(`${L.ul}: < ${Math.max(1,Math.round(sSet.slaDl*0.33))} Мбит/с — ${slowUl}`);
+          if(highPing) issues.push(`${L.ping}: > ${sSet.slaPing} мс — ${highPing}`);
+          if(!issues.length) issues.push(S.reportLang==='en'?'No significant deviations detected.':'Существенных отклонений не выявлено.');
+          doc.setFontSize(11); doc.setTextColor(0,0,0);
+          doc.text(L.issues, margin, y); y+=12;
+          issues.forEach(line=>{ doc.text('• '+line, margin, y); y+=12; });
+
+          const pageW = doc.internal.pageSize.getWidth();
+          doc.setFontSize(9); doc.setTextColor(120);
+          doc.text(`${L.generated} ${new Date().toLocaleString(S.reportLang==='en'?'en-US':'ru-RU')}`, margin, doc.internal.pageSize.getHeight()-20);
+          doc.text(`${L.contact} _______________________`, pageW-280, doc.internal.pageSize.getHeight()-20);
+
+          doc.save(`report_${new Date().toISOString().slice(0,10)}.pdf`);
+        } catch (e) {
+          console.error(e); alert('Не удалось сгенерировать PDF');
+        } finally { btn.disabled=false; btn.textContent='📄 Экспорт отчёта'; }
+      });
+    });
+  </script>
+</body>
+</html>
